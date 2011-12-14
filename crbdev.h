@@ -292,5 +292,7 @@ irqreturn_t rckcrb_isr(int irq, void *dev_id);
 void setSubnetSize(unsigned long nSize);
 void setTxBaseAddress(unsigned long nAddress);
 
+extern unsigned cached_sif_config;
+
 #endif // ifndef CRBDEV_H
 

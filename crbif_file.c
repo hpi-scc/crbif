@@ -265,6 +265,7 @@ ssize_t crbif_write(struct file* filp, const char __user* buf,
   unsigned      freeSpace;
   int           result;
   unsigned long flags;
+  unsigned      i;
 
   /* First calculate how much data we can actually store
    * Note that we always write entire packets
@@ -290,6 +291,30 @@ ssize_t crbif_write(struct file* filp, const char __user* buf,
   }
 
   
+  /* Check for write to SIF config register */
+  for (i = 0; i < packetCount; i++) {
+    unsigned char inputPacket[MIP_BYTE_PACKET_SIZE];
+    if (copy_from_user(inputPacket, buf + i * sizeof(inputPacket), sizeof(inputPacket))) {
+      return -EFAULT;
+    }
+
+    /* Check for write to GRB range:
+       transferPacket(SIFROUTE, SIFDESTID, writeFpgaGrbAddr = (4*0x2007) & ~7,
+          NCWR, writeFpgaGrbByteEn = 0xf0, ..., SIF_GRB_PORT)
+     */
+    if ((inputPacket[4*8+0] == 0xF0) &&			// byte enable
+        (inputPacket[4*8+2] == 0 /*SIF_HOST_PORT*/) &&	// src port
+        (inputPacket[4*8+3] == 2 /*SIF_GRB_PORT*/) &&	// dst port
+        (*(unsigned*)&inputPacket[4*9] == ((4*0x2007 /*SIFCFG_CONFIG*/) & ~7)) &&
+        (*(unsigned*)&inputPacket[4*10] ==
+           (((5 /*SIFDESTID=PERIS*/) << 22) |
+            ((3 /*SIFROUTE*/) << 14) |
+            ((0x022 /*NCWR*/) << 2))) &&
+        (*(unsigned*)&inputPacket[4*11] == 0)) {
+      cached_sif_config = *(unsigned*)&inputPacket[4*1];
+    }
+  }
+
   down(&crb_appl->app_sema);
   /* Copy the packet data from userspace into the MIP buffer */
   result = crbif_fifo_write(&crb_appl->mip_fifo, buf, totalBytes, USERSPACE);

@@ -48,6 +48,12 @@ extern int mcedev_debug;
 extern int tlpsmax;
 
 
+/* Last value written to SIFCFG_CONFIG register in FPGA's GRB space.
+ * Bit 1 (= 0x2) controls whether automatic write responses are enabled.
+ */
+unsigned cached_sif_config = 0x00000002;
+
+
 int scemiBufferSize = 32;
 module_param(scemiBufferSize, int, 0444);
 MODULE_PARM_DESC(scemiBufferSize, "SCEMI buffer size");
