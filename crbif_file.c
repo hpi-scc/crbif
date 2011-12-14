@@ -193,6 +193,7 @@ ssize_t crbif_read(struct file* filp, char __user* buf,
   unsigned      packetCount     = 0;
   unsigned      totalBytes      = 0;
   int           result;
+  unsigned long flags;
 
   if (crb_appl->mop_fifo.level < 0 ) {
     MPRINTK(MCEDBG_READWRITE, KERN_DEBUG "Warning: MOP fifo level < 0, (is %d)\n", crb_appl->mop_fifo.level);
@@ -217,10 +218,12 @@ ssize_t crbif_read(struct file* filp, char __user* buf,
   /* First calculate how much data we can actually return
    * Note that we always return entire packets
    */
+  spin_lock_irqsave(&(crb_appl->mop_fifo.lock), flags);
   if (count > crb_appl->mop_fifo.level) 
     packetCount = crb_appl->mop_fifo.level / MOP_BYTE_PACKET_SIZE;
   else
     packetCount = count / MOP_BYTE_PACKET_SIZE;
+  spin_unlock_irqrestore(&(crb_appl->mop_fifo.lock), flags);
   totalBytes = packetCount * MOP_BYTE_PACKET_SIZE;
 
   
@@ -261,11 +264,14 @@ ssize_t crbif_write(struct file* filp, const char __user* buf,
   unsigned      packetCount     = 0;
   unsigned      freeSpace;
   int           result;
+  unsigned long flags;
 
   /* First calculate how much data we can actually store
    * Note that we always write entire packets
    */
+  spin_lock_irqsave(&(crb_appl->mip_fifo.lock), flags);
   freeSpace = dmaBufferSize - crb_appl->mip_fifo.level;
+  spin_unlock_irqrestore(&(crb_appl->mip_fifo.lock), flags);
   if (count > freeSpace) 
     packetCount = freeSpace / MIP_BYTE_PACKET_SIZE;
   else
@@ -284,8 +290,10 @@ ssize_t crbif_write(struct file* filp, const char __user* buf,
   }
 
   
+  down(&crb_appl->app_sema);
   /* Copy the packet data from userspace into the MIP buffer */
   result = crbif_fifo_write(&crb_appl->mip_fifo, buf, totalBytes, USERSPACE);
+  up(&crb_appl->app_sema);
   if (result) {
     printk(KERN_ERR "crbif_write: FIFO error detected (%i)\n", result);
     return -EFAULT;
@@ -381,11 +389,13 @@ long crbif_intern_ioctl(struct file* psFile, unsigned int nCommand, unsigned lon
       break;
     case CRBIF_RESET:
       /* Reset the MIP FIFO */
+      down(&crb_appl->app_sema);
       spin_lock_irqsave(&(crb_appl->mip_fifo.lock), flags);
       crb_appl->mip_fifo.readPointer  = 0;
       crb_appl->mip_fifo.writePointer = 0;
       crb_appl->mip_fifo.level        = 0;
       spin_unlock_irqrestore(&(crb_appl->mip_fifo.lock), flags);
+      up(&crb_appl->app_sema);
 
       /* Also reset the MOP FIFO which is protected by its own spinlock */
       spin_lock_irqsave(&(crb_appl->mop_fifo.lock), flags);

@@ -311,12 +311,15 @@ finish:
 unsigned crbif_fifo2dma(void* dmaBuffer, struct dma_fifo* fifo, 
                         unsigned maxSize) 
 {
+  unsigned long flags;
   unsigned  bytesToCopy;
   unsigned  packetCount;
   
   /* Determine how many bytes to copy: max(FIFO size, available bytes) */
+  spin_lock_irqsave(&fifo->lock, flags);
   bytesToCopy = maxSize;
   if (fifo->level < maxSize) bytesToCopy = fifo->level;
+  spin_unlock_irqrestore(&fifo->lock, flags);
   
   /* Always transfer entire packets to the FPGA */
   packetCount = bytesToCopy / MIP_BYTE_PACKET_SIZE;
@@ -899,6 +902,7 @@ int crbif_init(struct mcedev_data* mcedev, int dev_found, int major)
   }
   memset(crb_appl, 0, sizeof(struct rckcrb_data));
   crb_appl->func2bar = &func2barXilinx[0];
+  sema_init(&crb_appl->app_sema, 1);
   spin_lock_init(&crb_appl->mip_fifo.lock);
   spin_lock_init(&crb_appl->mop_fifo.lock);
   spin_lock_init(&crb_appl->net_fifo.lock);

@@ -221,6 +221,8 @@ struct rckcrb_data {
   struct work_struct crbif_work;
   struct pci_dev *dev;
 
+  struct semaphore app_sema;
+
   /* Additional elements for the crbif kernel module
    * They are appended to the existing rckcrb_data structure so the
    * existing CRB functions can be reused
