@@ -645,7 +645,7 @@ void crbif_extractData(unsigned cmd, unsigned address, u8 byteEnable,
     /* Count valid bytes */
     if (((byteEnable >> i) & 0x01) == 1) *size += 1;
     /* Else increment the offset while we have not found the data */
-    else if (size == 0) *offset += 1;
+    else if (*size == 0) *offset += 1;
   }
 }
 
