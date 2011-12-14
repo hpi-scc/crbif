@@ -80,6 +80,9 @@ static int dmaState = 0;
 module_param(dmaState, int, 0444);
 MODULE_PARM_DESC(dmaState, "Provide access to the DMA state of the daemon");
 
+static int enableVUART = 1;
+module_param(enableVUART, int, 0644);
+MODULE_PARM_DESC(enableVUART, "Enable handling of virtual UARTs in the driver");
 
 /*
  * Device function to BAR translation.
@@ -646,7 +649,7 @@ int crbif_getTtySlot(unsigned cmd, unsigned address, u8 memtype, unsigned* dev_o
   /* I/O packets use command NCIORD (0x006) or NCIOWR (0x023) and target
    * one of the registered I/O ranges.
    */
-  if ((cmd == 0x006 /*NCIORD*/) || (cmd == 0x023 /*NCIOWR*/)) {
+  if (enableVUART && ((cmd == 0x006 /*NCIORD*/) || (cmd == 0x023 /*NCIOWR*/))) {
 #ifdef CRBTTY_TTYS_PER_CORE
 #if CRBTTY_TTYS_PER_CORE >= 1
     if ((memtype == 0x0) && (address >= 0x3f8) && (address <= 0x3ff)) {  // COM1 @ 0x3f8
