@@ -202,6 +202,8 @@ int crbif_fifo_write(struct dma_fifo* fifo, const void* source, unsigned size,
                      int userSpace);
 
 
+#define CRBTTY_CORE_COUNT	48
+#define CRBTTY_TTYS_PER_CORE	4
 
 struct rckcrb_data {
   unsigned long major, minor; //, numfunctions;
@@ -222,6 +224,7 @@ struct rckcrb_data {
   struct pci_dev *dev;
 
   struct semaphore app_sema;
+  struct crb_tty* tty[CRBTTY_CORE_COUNT][CRBTTY_TTYS_PER_CORE];
 
   /* Additional elements for the crbif kernel module
    * They are appended to the existing rckcrb_data structure so the

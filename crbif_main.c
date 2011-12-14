@@ -31,6 +31,7 @@
 #include "mcedev.h"
 #include "mcedev_common.h"
 #include "crbdev.h"             /* CopperRidge specifics */
+#include "crbtty.h"
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
 #define IRQF_SHARED SA_SHIRQ
@@ -601,6 +602,29 @@ void crbif_decodeHeader(u8* packet, u8* core, unsigned* cmd,
           *cmd, *address, *memType, *core);
 }
 
+void crbif_buildResponseHeader(u8* ResponsePacket, u8* Packet, unsigned cmd)
+{
+  ResponsePacket[32] = Packet[32];
+  ResponsePacket[33] = Packet[33];
+  ResponsePacket[34] = (Packet[41] >> 3) & 0x03;
+  ResponsePacket[35] = Packet[34];
+
+  ResponsePacket[36] = Packet[36];
+  ResponsePacket[37] = Packet[37];
+  ResponsePacket[38] = Packet[38];
+  ResponsePacket[39] = Packet[39];
+
+  ResponsePacket[40] = (Packet[40] & 0x03) | ((cmd << 2) & 0xFC);
+  ResponsePacket[41] = (Packet[41] & 0xC0) | ((cmd >> 6) & 0x3F);
+  ResponsePacket[42] = Packet[42];
+  ResponsePacket[43] = Packet[43];
+
+  ResponsePacket[44] = Packet[44];
+  ResponsePacket[45] = Packet[45];
+  ResponsePacket[46] = Packet[46];
+  ResponsePacket[47] = Packet[47];
+}
+
 int crbif_isNetPacket(unsigned cmd, u8 memType)
 {
   /* Network packets are write requests from Rock Creek. The command
@@ -615,6 +639,93 @@ int crbif_isNetPacket(unsigned cmd, u8 memType)
   }
   
   return 0;
+}
+
+int crbif_getTtySlot(unsigned cmd, unsigned address, u8 memtype, unsigned* dev_offset)
+{
+  /* I/O packets use command NCIORD (0x006) or NCIOWR (0x023) and target
+   * one of the registered I/O ranges.
+   */
+  if ((cmd == 0x006 /*NCIORD*/) || (cmd == 0x023 /*NCIOWR*/)) {
+#ifdef CRBTTY_TTYS_PER_CORE
+#if CRBTTY_TTYS_PER_CORE >= 1
+    if ((memtype == 0x0) && (address >= 0x3f8) && (address <= 0x3ff)) {  // COM1 @ 0x3f8
+      *dev_offset = address - 0x3f8;
+      return 0;
+    }
+#endif
+#if CRBTTY_TTYS_PER_CORE >= 2
+    if ((memtype == 0x0) && (address >= 0x2f8) && (address <= 0x2ff)) {  // COM2 @ 0x2f8
+      *dev_offset = address - 0x2f8;
+      return 1;
+    }
+#endif
+#if CRBTTY_TTYS_PER_CORE >= 3
+    if ((memtype == 0x0) && (address >= 0x3e8) && (address <= 0x3ef)) {  // COM3 @ 0x3e8
+      *dev_offset = address - 0x3e8;
+      return 2;
+    }
+#endif
+#if CRBTTY_TTYS_PER_CORE >= 4
+    if ((memtype == 0x0) && (address >= 0x2e8) && (address <= 0x2ef)) {  // COM4 @ 0x2e8
+      *dev_offset = address - 0x2e8;
+      return 3;
+    }
+#endif
+#endif
+  }
+
+  return -1;
+}
+
+void crbif_handle_tty(struct rckcrb_data* crb_appl, unsigned cmd, u8 core, int tty,
+                      unsigned dev_offset, void* dmaBuffer, unsigned offset, unsigned size)
+{
+  void* buffer = dmaBuffer;
+
+  if ((core < CRBTTY_CORE_COUNT) && (tty >= 0 && tty < CRBTTY_TTYS_PER_CORE)) {
+    u8 Response[MIP_BYTE_PACKET_SIZE];
+
+    struct crb_tty* dev = crb_appl->tty[core][tty];
+    if (dev == NULL) {
+      return;  // TTY device not allocated
+    }
+
+    memset(Response, 0, sizeof(Response));
+
+    for (dev_offset += offset, buffer += offset; size > 0; size--, dev_offset++, buffer++, offset++) {
+      if (cmd == 0x006 /*NCIORD*/) {
+        unsigned char value = crbtty_target_read_byte(dev, dev_offset);
+
+        MPRINTK(MCEDBG_SERIAL, KERN_DEBUG
+          "CRBTTY: core=%d, tty=%d, read +%x (%s), value = %02x\n", core, tty, dev_offset, crbtty_get_register_name(dev_offset, 1), value
+        );
+
+        Response[offset] = value;
+      } else if (cmd == 0x023 /*NCIOWR*/) {
+        unsigned char value = *(unsigned char*)buffer;
+        crbtty_target_write_byte(dev, dev_offset, value);
+
+        MPRINTK(MCEDBG_SERIAL, KERN_DEBUG
+          "CRBTTY: core=%d, tty=%d, write+%x (%s), value = %02x\n", core, tty, dev_offset, crbtty_get_register_name(dev_offset, 0), value
+        );
+      } else {
+        MPRINTK(MCEDBG_SERIAL, KERN_DEBUG
+          "CRBTTY: core=%d, tty=%d, command %03x unknown\n", core, tty, cmd
+        );
+        break;
+      }
+    }
+
+    // Send response message.
+    // NOTE: This is not required for NCIOWR (at least with sccKit 1.3.0/crrl_110_rx_20100608.bit)
+    if (cmd == 0x006 /*NCIORD*/) {
+      crbif_buildResponseHeader(Response, dmaBuffer, 0x04e /*NCDATACMP*/);
+      down(&crb_appl->app_sema);
+      crbif_fifo_write(&crb_appl->mip_fifo, Response, MIP_BYTE_PACKET_SIZE, KERNELSPACE);
+      up(&crb_appl->app_sema);
+    }
+  }
 }
 
 void crbif_extractData(unsigned cmd, unsigned address, u8 byteEnable, 
@@ -696,6 +807,9 @@ void crbif_filter(struct work_struct *work)
 
   
   for (i=0; i<numPackets; i++) {
+    int tty;
+    unsigned dev_offset;
+
     /* Decode the packet header */
     crbif_decodeHeader(dmaBuffer, &core, &cmd, &address, &memType, &byteEnable);
     
@@ -708,6 +822,10 @@ void crbif_filter(struct work_struct *work)
        */
       crbif_extractData(cmd, address, byteEnable, &offset, &size);
       crbnet_pktHandler(core, address, dmaBuffer+offset, size);
+    }
+    else if ((tty = crbif_getTtySlot(cmd, address, memType, &dev_offset)) >= 0) {
+      crbif_extractData(cmd, address, byteEnable, &offset, &size);
+      crbif_handle_tty(crb_appl, cmd, core, tty, dev_offset, dmaBuffer, offset, size);
     }
     else {
       crbif_fifo_write(&crb_appl->mop_fifo, dmaBuffer, 
@@ -880,6 +998,7 @@ int crbif_init(struct mcedev_data* mcedev, int dev_found, int major)
   int devno;
   int irq; 
   int i;
+  int tty_core, tty_port;
 
   printk(KERN_INFO "crbif_init: %s (debuglevel %04X)\n",
 	 RCKCRBIDSTRING, mcedev_debug);
@@ -1055,6 +1174,16 @@ int crbif_init(struct mcedev_data* mcedev, int dev_found, int major)
                           &(mcedev->dev->dev), "crbif%drb%d", dev_found, i);
 #endif
 
+      for (tty_core = 0; tty_core < CRBTTY_CORE_COUNT; tty_core++) {
+        for (tty_port = 0; tty_port < CRBTTY_TTYS_PER_CORE; tty_port++) {
+          errorCode = crbtty_init(&crb_appl->tty[tty_core][tty_port], MKDEV(major, MKMINOR(dev_found, MAXNUM_RCKCRB_FUNCTIONS + tty_core*CRBTTY_TTYS_PER_CORE + tty_port)), 1024, mcedev->mcedev_class, dev_found, i, tty_core, tty_port);
+          if (errorCode) {
+            printk(KERN_ERR "crbif_init: crbtty_init(dev=%d, fun=%d, core=%d, tty=%d) failed, error: %i\n", dev_found, i, tty_core, tty_port, errorCode);
+            crbif_cleanup(mcedev);
+            return errorCode;
+          }
+        }
+      }
     }
   }
 
@@ -1114,7 +1243,7 @@ int crbif_init(struct mcedev_data* mcedev, int dev_found, int major)
 void crbif_cleanup(struct mcedev_data* mcedev) 
 {
   struct rckcrb_data* crb_appl = (struct rckcrb_data*)mcedev->specific_data;
-  int i;
+  int i, k;
 
   MPRINTK(MCEDBG_CLEANUP, KERN_DEBUG 
           "crbif_cleanup: Releasing device resources...\n");
@@ -1165,6 +1294,12 @@ void crbif_cleanup(struct mcedev_data* mcedev)
     crb_appl->crb_function[i].use_count = 0;
   }
 
+  /* Unregister TTYs */
+  for (i = 0; i < CRBTTY_CORE_COUNT; i++) {
+    for (k = 0; k < CRBTTY_TTYS_PER_CORE; k++) {
+      crbtty_cleanup(crb_appl->tty[i][k]);
+    }
+  }
 
   /* Free the resources */
   vfree(crb_appl->mip_fifo.data);
