@@ -694,13 +694,29 @@ void crbif_handle_tty(struct rckcrb_data* crb_appl, unsigned cmd, u8 core, int t
 
   if ((core < CRBTTY_CORE_COUNT) && (tty >= 0 && tty < CRBTTY_TTYS_PER_CORE)) {
     u8 Response[MIP_BYTE_PACKET_SIZE];
+    unsigned ResponseCommand;
 
     struct crb_tty* dev = crb_appl->tty[core][tty];
     if (dev == NULL) {
       return;  // TTY device not allocated
     }
 
+    // Prepare response message.
+    // NOTE: This is not required for NCIOWR if automatic write responses are
+    // enabled in the FPGA. On sccKit 1.3.0/crrl_110_rx_20100608.bit, the FPGA
+    // always generated write responses; on later bitstreams, this can be
+    // controlled via the SIFCFG_CONFIG register, bitmask 0x00000002.
     memset(Response, 0, sizeof(Response));
+    if (cmd == 0x006 /*NCIORD*/) {
+      // We need to send data back to the requesting agent
+      ResponseCommand = 0x04e;  /*NCDATACMP*/
+    } else if ((cmd == 0x023) && !(cached_sif_config & 0x2)) {
+      // The FPGA has not replied to this packet, so we need to do it ourselves
+      ResponseCommand = 0x049;  /*MEMCMP*/
+    } else {
+      // Unknown command or no response needed
+      ResponseCommand = 0;
+    }
 
     for (dev_offset += offset, buffer += offset; size > 0; size--, dev_offset++, buffer++, offset++) {
       if (cmd == 0x006 /*NCIORD*/) {
@@ -727,9 +743,8 @@ void crbif_handle_tty(struct rckcrb_data* crb_appl, unsigned cmd, u8 core, int t
     }
 
     // Send response message.
-    // NOTE: This is not required for NCIOWR (at least with sccKit 1.3.0/crrl_110_rx_20100608.bit)
-    if (cmd == 0x006 /*NCIORD*/) {
-      crbif_buildResponseHeader(Response, dmaBuffer, 0x04e /*NCDATACMP*/);
+    if (ResponseCommand) {
+      crbif_buildResponseHeader(Response, dmaBuffer, ResponseCommand);
       down(&crb_appl->app_sema);
       crbif_fifo_write(&crb_appl->mip_fifo, Response, MIP_BYTE_PACKET_SIZE, KERNELSPACE);
       up(&crb_appl->app_sema);
