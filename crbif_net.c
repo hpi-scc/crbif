@@ -866,7 +866,7 @@ void crbnet_init(struct net_device* dev)
   /* Reset the flags set by ether_setup() and set NOARP */
   dev->flags              = IFF_NOARP;
   /* Checksum checks are not required */
-  dev->features          |= NETIF_F_NO_CSUM;
+  dev->features          |= NETIF_F_HW_CSUM;
   /* Change the hardware header as there is no need for an Ethernet format */
   dev->hard_header_len    = 2;
   dev->addr_len           = 0;

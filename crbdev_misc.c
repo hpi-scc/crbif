@@ -86,10 +86,9 @@ void rckcrb_disable_ASPM(struct mcedev_data *mcedev) {
 	  PCI_SLOT(mcedev->dev->devfn),
 	  PCI_FUNC(mcedev->dev->devfn));
 
-  MPRINTK(MCEDBG_INIT, KERN_DEBUG "RCKCRB DBG: Bus: n:%i, p:%i, s:%i\n",
+  MPRINTK(MCEDBG_INIT, KERN_DEBUG "RCKCRB DBG: Bus: n:%i, p:%i\n",
 	  mcedev->dev->bus->number,
-	  mcedev->dev->bus->primary,
-	  mcedev->dev->bus->secondary);
+	  mcedev->dev->bus->primary);
 
   MPRINTK(MCEDBG_INIT, KERN_DEBUG "RCKCRB DBG: Bus->Self: V:0x%04x D:0x%04x S:0x%02x F:0x%02x\n", 
 	  mcedev->dev->bus->self->vendor,
@@ -97,10 +96,9 @@ void rckcrb_disable_ASPM(struct mcedev_data *mcedev) {
 	  PCI_SLOT(mcedev->dev->bus->self->devfn),
 	  PCI_FUNC(mcedev->dev->bus->self->devfn));
 
-  MPRINTK(MCEDBG_INIT, KERN_DEBUG "RCKCRB DBG: Bus->Self->Bus: n:%i, p:%i, s:%i\n",
+  MPRINTK(MCEDBG_INIT, KERN_DEBUG "RCKCRB DBG: Bus->Self->Bus: n:%i, p:%i\n",
 	  mcedev->dev->bus->self->bus->number,
-	  mcedev->dev->bus->self->bus->primary,
-	  mcedev->dev->bus->self->bus->secondary);
+	  mcedev->dev->bus->self->bus->primary);
 
 
   printk(KERN_DEBUG "rckcrb_init: Checking and disabling ASPM on root port %04x:%04x (%02x:%02x.%02x) for rckcrb device\n",
