@@ -91,8 +91,12 @@ int mcedev_debug = 0x0;
 int mcedev_found = 0;
 int mcedev_major = MCEDEV_MAJOR;
 
-//struct semaphore mcedev_sem;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)
+struct semaphore mcedev_sem;
+DEFINE_SEMAPHORE(mcedev_sem);
+#else
 DECLARE_MUTEX(mcedev_sem);
+#endif
 
 
 static int mcedev_probe(struct pci_dev *dev, const struct pci_device_id *id)

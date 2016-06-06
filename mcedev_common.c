@@ -17,6 +17,7 @@
 #include <linux/pci.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
+#include <linux/export.h>
 
 #include "mcedev.h"
 #include "mcedev_common.h"
